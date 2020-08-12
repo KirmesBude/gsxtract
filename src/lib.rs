@@ -160,7 +160,7 @@ impl GSRom {
                 raw_sprite_atlas[16],
             ) as usize;
 
-            let identifier = format!("{:#010X}", i + 0x08000000);
+            let identifier = format!("{:#010X}", i*20 + 0x08000000);
             let mut sprite_atlas =
                 GSSpriteAtlas::new(identifier, sprite_width, sprite_height, sprite_scale);
 
@@ -182,7 +182,7 @@ impl GSRom {
 
                 match compression_format {
                     0x00 => sprite.decompress0(sprite_data, &self.c0palette),
-                    _ => (), //TODO: add other decompression formats
+                    _ => println!("compression format {} found at {:#010X}!", compression_format, i*20 + 0x08000000), //TODO: add other decompression formats
                 }
 
                 sprite_atlas.push(sprite);
