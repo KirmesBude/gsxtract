@@ -1,6 +1,6 @@
 use std::{fs, io, path::Path};
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum GSColor {
     RGB { red: u8, green: u8, blue: u8 },
     Transparent,
@@ -13,25 +13,13 @@ impl GSColor {
 }
 
 pub struct GSSprite {
-    width: u8,
-    height: u8,
-    scale: f32,
     data: Vec<GSColor>,
 }
 
 impl GSSprite {
-    pub fn new(height: u8, width: u8, scale: u16) -> Self {
-        let scale = match scale {
-            0x0200 => 2.0,
-            0x0080 => 0.5,
-            _ => 1.0,
-        };
-
+    pub fn new(width: u8, height: u8, _scale: u16) -> Self {
         Self {
-            width,
-            height,
-            scale,
-            data: vec![GSColor::Transparent; (width * height) as usize],
+            data: vec![GSColor::Transparent; (width as usize * height as usize)],
         }
     }
 
@@ -39,24 +27,35 @@ impl GSSprite {
         let mut offset = 0;
 
         for (i, byte) in raw_data.iter().enumerate() {
+            if i+offset >= self.data.len() {
+                break;
+            }
             match byte {
                 0x00 => break,                                                        //end
                 0x01..=0xDF => self.data.insert(i + offset, palette[*byte as usize]), //decompress from palette
-                0xE0..=0xFF => offset += *byte as usize, //increase offset to compensate
+                0xE0..=0xFF => offset += (*byte-0xDF) as usize, //increase offset to compensate
             }
         }
     }
 }
 
-pub struct GSTexture {
+pub struct GSSpriteAtlas {
     identifier: String,
+    sprite_width: u8,
+    sprite_height: u8,
+    sprite_scale: f32,
     sprites: Vec<GSSprite>,
 }
 
-impl GSTexture {
-    pub fn new(identifier: String) -> Self {
+impl GSSpriteAtlas {
+    pub fn new(identifier: String, sprite_width: u8, sprite_height: u8, scale: u16) -> Self {
+        let sprite_scale: f32 = scale as f32 / 256 as f32;
+
         Self {
             identifier,
+            sprite_width,
+            sprite_height,
+            sprite_scale,
             sprites: vec![],
         }
     }
@@ -68,6 +67,22 @@ impl GSTexture {
 
     pub fn push(&mut self, sprite: GSSprite) {
         self.sprites.push(sprite);
+    }
+
+    pub fn identifier(&self) -> &str {
+        &self.identifier
+    }
+
+    pub fn sprite_width(&self) -> u8 {
+        self.sprite_width
+    }
+
+    pub fn sprite_height(&self) -> u8 {
+        self.sprite_height
+    }
+
+    pub fn sprite_scale(&self) -> f32 {
+        self.sprite_scale
     }
 }
 pub struct GSRom {
@@ -92,9 +107,10 @@ impl GSRom {
         let end = Self::convert_addr(0x08017CD0);
         for (i, short) in data[start..end].chunks(2).enumerate().skip(1) {
             let color: u16 = Self::to_short(short[1], short[0]);
-            let r: u8 = (color & 0x05) as u8;
-            let g: u8 = ((color >> 5) & 0x05) as u8;
-            let b: u8 = ((color >> 10) & 0x05) as u8;
+
+            let r: u8 = ((color & 0x1F)*255/31) as u8;
+            let g: u8 = (((color >> 5) & 0x1F)*255/31)  as u8;
+            let b: u8 = (((color >> 10) & 0x1F)*255/31)  as u8;
             palette[i] = GSColor::new_rgb(r, g, b);
         }
 
@@ -109,42 +125,70 @@ impl GSRom {
         self.data.get(Self::convert_addr(addr))
     }
 
-    pub fn decompress_sprites(&self) -> Vec<GSTexture> {
-        let vec = vec![];
+    pub fn decompress_sprites(&self) -> Vec<GSSpriteAtlas> {
+        let mut vec = vec![];
 
         //TODO:
         //Take the master sprite table slice and go over it in 20Byte chunks
         //at 08300000 to 08680000
         //Take some sort of mapping file to give the textures an identifier
         let start = Self::convert_addr(0x08300000);
-        let end = Self::convert_addr(0x08680000);
+        let end = Self::convert_addr(0x08302918);
 
-        for (i, raw_texture) in self.data[start..end].chunks(20).enumerate() {
+        for (i, raw_sprite_atlas) in self.data[start..end].chunks(20).enumerate() {
+            let sprite_width = raw_sprite_atlas[0];
+            let sprite_height = raw_sprite_atlas[1];
+            let sprite_scale = Self::to_short(raw_sprite_atlas[3], raw_sprite_atlas[2]);
+            let num_of_dir = raw_sprite_atlas[4];
+            let _num_of_ani = raw_sprite_atlas[5];
+            let _x_offset = raw_sprite_atlas[6];
+            let _y_offset = raw_sprite_atlas[7];
+            let _unknown = raw_sprite_atlas[8];
+            let _collsion_radius = raw_sprite_atlas[9];
+            let compression_format = raw_sprite_atlas[10];
+            let _unused = raw_sprite_atlas[11];
+            let sprites_addr: usize = Self::to_word(
+                raw_sprite_atlas[15],
+                raw_sprite_atlas[14],
+                raw_sprite_atlas[13],
+                raw_sprite_atlas[12],
+            ) as usize;
+            let _anis_addr: usize = Self::to_word(
+                raw_sprite_atlas[19],
+                raw_sprite_atlas[18],
+                raw_sprite_atlas[17],
+                raw_sprite_atlas[16],
+            ) as usize;
+
             let identifier = format!("{:#010X}", i + 0x08000000);
-            let texture = GSTexture::new(identifier);
-            let sprite_width = raw_texture[0];
-            let sprite_height = raw_texture[1];
-            let sprite_scale = Self::to_short(raw_texture[3], raw_texture[2]);
-            let num_of_dir = raw_texture[4];
-            let num_of_ani = raw_texture[5];
-            let x_offset = raw_texture[6];
-            let y_offset = raw_texture[7];
-            let _unknown = raw_texture[8];
-            let collsion_radius = raw_texture[9];
-            let compression_format = raw_texture[10];
-            let _unused = raw_texture[11];
-            let sprite_addr = Self::to_word(
-                raw_texture[15],
-                raw_texture[14],
-                raw_texture[13],
-                raw_texture[12],
-            );
-            let ani_addr = Self::to_word(
-                raw_texture[19],
-                raw_texture[18],
-                raw_texture[17],
-                raw_texture[16],
-            );
+            let mut sprite_atlas =
+                GSSpriteAtlas::new(identifier, sprite_width, sprite_height, sprite_scale);
+
+            for sprite_addr_bytes in self.data[Self::convert_addr(sprites_addr)
+                ..Self::convert_addr(sprites_addr + 4 * (num_of_dir as usize))]
+                .chunks(4)
+            {
+                let sprite_addr = Self::to_word(
+                    sprite_addr_bytes[3],
+                    sprite_addr_bytes[2],
+                    sprite_addr_bytes[1],
+                    sprite_addr_bytes[0],
+                ) as usize;
+
+                let sprite_data = &self.data[Self::convert_addr(sprite_addr)
+                    ..Self::convert_addr(sprite_addr + (sprite_width as usize * sprite_height as usize))];
+
+                let mut sprite = GSSprite::new(sprite_width, sprite_height, sprite_scale);
+
+                match compression_format {
+                    0x00 => sprite.decompress0(sprite_data, &self.c0palette),
+                    _ => (), //TODO: add other decompression formats
+                }
+
+                sprite_atlas.push(sprite);
+            }
+
+            vec.push(sprite_atlas);
         }
 
         vec
