@@ -1,5 +1,7 @@
 use std::{fs, io, path::Path};
 
+pub use texture_packer;
+
 #[derive(Debug, Clone, Copy)]
 pub enum GSColor {
     RGB { red: u8, green: u8, blue: u8 },
