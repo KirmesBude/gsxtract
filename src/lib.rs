@@ -1,31 +1,25 @@
 use std::{fs, io, path::Path};
 
 pub use texture_packer;
-
-#[derive(Debug, Clone, Copy)]
-pub enum GSColor {
-    RGB { red: u8, green: u8, blue: u8 },
-    Transparent,
-}
-
-impl GSColor {
-    pub fn new_rgb(red: u8, green: u8, blue: u8) -> Self {
-        Self::RGB { red, green, blue }
-    }
-}
+use texture_packer::texture::memory_rgba8_texture::RGBA8;
 
 pub struct GSSprite {
-    data: Vec<GSColor>,
+    data: Vec<RGBA8>,
 }
 
 impl GSSprite {
     pub fn new(width: u8, height: u8, _scale: u16) -> Self {
         Self {
-            data: vec![GSColor::Transparent; (width as usize * height as usize)],
+            data: vec![RGBA8 {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 0,
+            }; (width as usize * height as usize)],
         }
     }
 
-    pub fn decompress0(&mut self, raw_data: &[u8], palette: &[GSColor; 0xE0]) {
+    pub fn decompress0(&mut self, raw_data: &[u8], palette: &[RGBA8; 0xE0]) {
         let mut offset = 0;
 
         for (i, byte) in raw_data.iter().enumerate() {
@@ -89,7 +83,7 @@ impl GSSpriteAtlas {
 }
 pub struct GSRom {
     data: Vec<u8>,
-    c0palette: [GSColor; 0xE0],
+    c0palette: [RGBA8; 0xE0],
 }
 
 impl GSRom {
@@ -103,8 +97,13 @@ impl GSRom {
     // loweset 5 bit = RED
     // nest 5 bit = GREEEN
     // next 5 bit = BLUE
-    fn init_c0palette(data: &Vec<u8>) -> [GSColor; 0xE0] {
-        let mut palette: [GSColor; 224] = [GSColor::Transparent; 0xE0];
+    fn init_c0palette(data: &Vec<u8>) -> [RGBA8; 0xE0] {
+        let mut palette: [RGBA8; 224] = [RGBA8 {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 0,
+        }; 0xE0];
         let start = Self::convert_addr(0x08017B10);
         let end = Self::convert_addr(0x08017CD0);
         for (i, short) in data[start..end].chunks(2).enumerate().skip(1) {
@@ -113,13 +112,18 @@ impl GSRom {
             let r: u8 = ((color & 0x1F)*255/31) as u8;
             let g: u8 = (((color >> 5) & 0x1F)*255/31)  as u8;
             let b: u8 = (((color >> 10) & 0x1F)*255/31)  as u8;
-            palette[i] = GSColor::new_rgb(r, g, b);
+            palette[i] = RGBA8 {
+                r,
+                g,
+                b,
+                a: 255,
+            };
         }
 
         palette
     }
 
-    pub fn c0palette(&self) -> &[GSColor; 224] {
+    pub fn c0palette(&self) -> &[RGBA8; 224] {
         &self.c0palette
     }
 
