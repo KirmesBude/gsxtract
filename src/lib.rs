@@ -1,56 +1,72 @@
 use std::{fs, io, path::Path};
 
-pub use texture_packer;
-use texture_packer::texture::memory_rgba8_texture::RGBA8;
+#[derive(Clone, Copy)]
+pub enum GSColor {
+    Transparent,
+    RGB5([u8; 3]),
+}
 
 pub struct GSSprite {
-    data: Vec<RGBA8>,
+    data: Vec<GSColor>,
 }
 
 impl GSSprite {
-    pub fn new(width: u8, height: u8, _scale: u16) -> Self {
-        Self {
-            data: vec![RGBA8 {
-                r: 0,
-                g: 0,
-                b: 0,
-                a: 0,
-            }; (width as usize * height as usize)],
-        }
-    }
-
-    pub fn decompress0(&mut self, raw_data: &[u8], palette: &[RGBA8; 0xE0]) {
+    pub fn decompress0(
+        width: u8,
+        height: u8,
+        _scale: u16,
+        raw_data: &[u8],
+        palette: &[GSColor; 0xE0],
+    ) -> Self {
+        let mut data = vec![GSColor::Transparent; width as usize * height as usize];
         let mut offset = 0;
 
         for (i, byte) in raw_data.iter().enumerate() {
-            if i+offset >= self.data.len() {
+            if i + offset >= width as usize * height as usize {
                 break;
             }
             match byte {
-                0x00 => break,                                                        //end
-                0x01..=0xDF => self.data.insert(i + offset, palette[*byte as usize]), //decompress from palette
-                0xE0..=0xFF => offset += (*byte-0xDF) as usize, //increase offset to compensate
+                0x00 => break,                                             //end
+                0x01..=0xDF => data[i + offset] = palette[*byte as usize], //decompress from palette
+                0xE0..=0xFF => offset += (*byte - 0xE0) as usize, //increase offset to compensate
             }
         }
+
+        Self { data }
+    }
+
+    pub fn size(&self) -> usize {
+        self.data.len()
+    }
+
+    pub fn get_buffer(&self) -> Vec<u8> {
+        self.data
+            .iter()
+            .map(|pixel| match pixel {
+                GSColor::RGB5(rgb) => vec![rgb[0], rgb[1], rgb[2], 255],
+                _ => vec![0, 0, 0, 0],
+            })
+            .flatten()
+            .collect()
     }
 }
 
 pub struct GSSpriteAtlas {
     identifier: String,
-    sprite_width: u8,
-    sprite_height: u8,
+    sprite_width: u32,
+    sprite_height: u32,
     sprite_scale: f32,
     sprites: Vec<GSSprite>,
 }
 
 impl GSSpriteAtlas {
     pub fn new(identifier: String, sprite_width: u8, sprite_height: u8, scale: u16) -> Self {
-        let sprite_scale: f32 = scale as f32 / 256 as f32;
+        let sprite_scale: f32 = scale as f32 / 256_f32;
 
         Self {
             identifier,
-            sprite_width,
-            sprite_height,
+            sprite_width: sprite_width.into(),
+            sprite_height: sprite_height.into(),
             sprite_scale,
             sprites: vec![],
         }
@@ -69,21 +85,25 @@ impl GSSpriteAtlas {
         &self.identifier
     }
 
-    pub fn sprite_width(&self) -> u8 {
+    pub fn sprite_width(&self) -> u32 {
         self.sprite_width
     }
 
-    pub fn sprite_height(&self) -> u8 {
+    pub fn sprite_height(&self) -> u32 {
         self.sprite_height
     }
 
     pub fn sprite_scale(&self) -> f32 {
         self.sprite_scale
     }
+
+    pub fn get_sprites(&self) -> &Vec<GSSprite> {
+        &self.sprites
+    }
 }
 pub struct GSRom {
     data: Vec<u8>,
-    c0palette: [RGBA8; 0xE0],
+    c0palette: [GSColor; 0xE0],
 }
 
 impl GSRom {
@@ -97,33 +117,23 @@ impl GSRom {
     // loweset 5 bit = RED
     // nest 5 bit = GREEEN
     // next 5 bit = BLUE
-    fn init_c0palette(data: &Vec<u8>) -> [RGBA8; 0xE0] {
-        let mut palette: [RGBA8; 224] = [RGBA8 {
-            r: 0,
-            g: 0,
-            b: 0,
-            a: 0,
-        }; 0xE0];
+    fn init_c0palette(data: &[u8]) -> [GSColor; 0xE0] {
+        let mut palette: [GSColor; 224] = [GSColor::Transparent; 0xE0];
         let start = Self::convert_addr(0x08017B10);
         let end = Self::convert_addr(0x08017CD0);
         for (i, short) in data[start..end].chunks(2).enumerate().skip(1) {
             let color: u16 = Self::to_short(short[1], short[0]);
 
-            let r: u8 = ((color & 0x1F)*255/31) as u8;
-            let g: u8 = (((color >> 5) & 0x1F)*255/31)  as u8;
-            let b: u8 = (((color >> 10) & 0x1F)*255/31)  as u8;
-            palette[i] = RGBA8 {
-                r,
-                g,
-                b,
-                a: 255,
-            };
+            let r: u8 = ((color & 0x1F) * 255 / 31) as u8;
+            let g: u8 = (((color >> 5) & 0x1F) * 255 / 31) as u8;
+            let b: u8 = (((color >> 10) & 0x1F) * 255 / 31) as u8;
+            palette[i] = GSColor::RGB5([r, g, b]);
         }
 
         palette
     }
 
-    pub fn c0palette(&self) -> &[RGBA8; 224] {
+    pub fn c0palette(&self) -> &[GSColor; 0xE0] {
         &self.c0palette
     }
 
@@ -166,7 +176,7 @@ impl GSRom {
                 raw_sprite_atlas[16],
             ) as usize;
 
-            let identifier = format!("{:#010X}", i*20 + 0x08000000);
+            let identifier = format!("{:#010X}", i * 20 + 0x08000000);
             let mut sprite_atlas =
                 GSSpriteAtlas::new(identifier, sprite_width, sprite_height, sprite_scale);
 
@@ -182,16 +192,29 @@ impl GSRom {
                 ) as usize;
 
                 let sprite_data = &self.data[Self::convert_addr(sprite_addr)
-                    ..Self::convert_addr(sprite_addr + (sprite_width as usize * sprite_height as usize))];
-
-                let mut sprite = GSSprite::new(sprite_width, sprite_height, sprite_scale);
+                    ..Self::convert_addr(
+                        sprite_addr + (sprite_width as usize * sprite_height as usize),
+                    )];
 
                 match compression_format {
-                    0x00 => sprite.decompress0(sprite_data, &self.c0palette),
-                    _ => println!("compression format {} found at {:#010X}!", compression_format, i*20 + 0x08000000), //TODO: add other decompression formats
+                    0x00 => {
+                        let sprite = GSSprite::decompress0(
+                            sprite_width,
+                            sprite_height,
+                            sprite_scale,
+                            sprite_data,
+                            &self.c0palette,
+                        );
+                        sprite_atlas.push(sprite);
+                    }
+                    _ => println!(
+                        "compression format {} found at {:#010X}!",
+                        compression_format,
+                        i * 20 + 0x08000000
+                    ), //TODO: add other decompression formats
                 }
 
-                sprite_atlas.push(sprite);
+                //sprite_atlas.push(sprite);
             }
 
             vec.push(sprite_atlas);
