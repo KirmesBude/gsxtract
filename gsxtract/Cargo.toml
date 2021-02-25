@@ -1,0 +1,11 @@
+[package]
+name = "gsxtract"
+version = "0.1.0"
+authors = ["KirmesBude <kirmesbude@gmail.com>"]
+edition = "2018"
+
+[[test]]
+name = "test"
+path = "tests/tests.rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

@@ -1,6 +1,4 @@
-pub mod lib;
-
-use lib::*;
+use gsxtract::*;
 use std::{
     fs::{self, File},
     io,
@@ -10,7 +8,7 @@ use texture_packer::{texture::Texture, exporter::ImageExporter};
 pub fn main() -> Result<(), io::Error> {
     fs::create_dir_all("output").unwrap();
 
-    let rom = GSRom::new("Golden Sun - The Lost Age.gba")?;
+    let rom = GSRom::new("references/Golden Sun - The Lost Age.gba")?;
     let test = rom.decompress_sprites();
 
     let packer_conf = texture_packer::TexturePackerConfig {

@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use spagyric::*;
+    use gsxtract::*;
 
     const PALETTE: [GSColor; 0xE0] = [
         GSColor::Transparent,
