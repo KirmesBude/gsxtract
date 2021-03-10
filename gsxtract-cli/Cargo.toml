@@ -10,3 +10,4 @@ edition = "2018"
 gsxtract = { path = "../gsxtract" }
 texture_packer = "0.21.1"
 image = "0.23.8"
+clap = "2.33.3"
