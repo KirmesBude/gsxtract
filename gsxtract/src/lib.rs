@@ -1,3 +1,4 @@
+use log::{error, trace};
 use std::{fs, io, path::Path};
 
 #[derive(Clone, Copy)]
@@ -108,12 +109,13 @@ pub struct GSRom {
 
 impl GSRom {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, io::Error> {
+        trace!("Got ROM");
         let data = fs::read(path)?;
         let c0palette = GSRom::init_c0palette(&data);
         Ok(Self { data, c0palette })
     }
 
-    // It is:  at 08017B10 to 08017CBF, encoded as 15 bit rgb with the LE, MSB is ignored
+    // It is:  at 08017B10 to 08017CBF, encoded as 15 bit rgb in LE, MSB is ignored
     // loweset 5 bit = RED
     // nest 5 bit = GREEEN
     // next 5 bit = BLUE
@@ -207,7 +209,7 @@ impl GSRom {
                         );
                         sprite_atlas.push(sprite);
                     }
-                    _ => println!(
+                    _ => error!(
                         "compression format {} found at {:#010X}!",
                         compression_format,
                         i * 20 + 0x08000000

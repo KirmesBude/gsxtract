@@ -1,17 +1,16 @@
+use clap::{crate_authors, crate_description, crate_name, crate_version, App, Arg};
 use gsxtract::*;
-use std::{
-    fs::File,
-    io,
-};
-use texture_packer::{texture::Texture, exporter::ImageExporter};
-use clap::{Arg, App};
+use simplelog::{Config, LevelFilter, SimpleLogger};
+use std::{fs::File, io};
+use texture_packer::{exporter::ImageExporter, texture::Texture};
 
 pub fn main() -> Result<(), io::Error> {
+    /* COMMAND ARGUMENTS */
     /* basic app information */
-    let app = App::new("gsxtract")
-        .version("0.1")
-        .about("Extracts all kinds of data from the ROMs of both GBA Golden Sun titles")
-        .author("KirmesBude");
+    let app = App::new(crate_name!())
+        .version(crate_version!())
+        .about(crate_description!())
+        .author(crate_authors!());
 
     /* define the path command line option */
     let path_option = Arg::with_name("path")
@@ -21,7 +20,7 @@ pub fn main() -> Result<(), io::Error> {
         .required(true);
     let app = app.arg(path_option);
 
-    /* define the extract command line option */
+    /* define the output command line option */
     let output_option = Arg::with_name("output")
         .long("output")
         .short("o")
@@ -38,25 +37,45 @@ pub fn main() -> Result<(), io::Error> {
         .required(false);
     let app = app.arg(verbosity_option);
 
+    /* define the quiet command line option */
+    let quiet_option = Arg::with_name("quiet")
+        .short("q")
+        .help("Silence all output")
+        .required(false);
+    let app = app.arg(quiet_option);
+
     /* extract matches */
     let matches = app.get_matches();
 
     /* extract the actual output */
-    let output = matches.value_of("output")
+    let output = matches
+        .value_of("output")
         .expect("This can't be None, we said it was required");
 
     /* extract the actual path */
-    let path = matches.value_of("path")
+    let path = matches
+        .value_of("path")
         .expect("This can't be None, we said it was required");
 
+    /* extract the actual quiet */
+    let quiet = matches.is_present("quiet");
+
     /* extract the actual verbosity */
-    /* TODO: link to log? */
-    match matches.occurrences_of("v") {
-        0 => println!("No verbose info"),
-        1 => println!("Some verbose info"),
-        2 => println!("Tons of verbose info"),
-        3 | _ => println!("Don't be crazy"),
-    }
+    let verbosity = if quiet {
+        LevelFilter::Off
+    } else {
+        match matches.occurrences_of("v") {
+            0 => LevelFilter::Error,
+            1 => LevelFilter::Warn,
+            2 => LevelFilter::Info,
+            3 => LevelFilter::Debug,
+            _ => LevelFilter::Trace,
+        }
+    };
+
+
+    /* LOGGING */
+    SimpleLogger::init(verbosity, Config::default()).unwrap();
 
     let rom = GSRom::new(path)?;
 
@@ -66,7 +85,7 @@ pub fn main() -> Result<(), io::Error> {
 }
 
 fn extract_sprites(rom: &GSRom, output: &str) {
-    let test = rom.decompress_sprites();
+    let sprite_atlases = rom.decompress_sprites();
 
     let packer_conf = texture_packer::TexturePackerConfig {
         max_width: 1024,
@@ -78,7 +97,7 @@ fn extract_sprites(rom: &GSRom, output: &str) {
         texture_outlines: true,
     };
 
-    for atlas in test {
+    for atlas in sprite_atlases {
         let mut packer = texture_packer::TexturePacker::new_skyline(packer_conf);
         let name = format!("{}.png", atlas.identifier());
         let path = format!("{}/{}", output, name);
