@@ -74,21 +74,26 @@ impl GSSprite {
     }
 
     pub fn decompress1(width: u8, height: u8, _scale: u16, raw_data: &[u8]) -> Self {
-        let mut rgb5_buffer: Vec<u8> = vec![];
+        let mut rgb5_buffer: Vec<u8> = vec![]; //vec![0x00; width as usize * height as usize * 2];
 
         let mut index: usize = 0;
         'outer: loop {
-            let instructions = BitSlice::<Lsb0, u8>::from_element(&raw_data[index]);
+            let instructions = BitSlice::<Msb0, u8>::from_element(&raw_data[index]);
             index += 1;
 
             println!("instructions:{:?}\n", instructions);
             //iterate through instructions beginning with highest bit
-            for bit in instructions.iter().rev() { //TODO: Not sure if reversing has the intended effect here
+            for bit in instructions.iter() {
                 println!("instruction bit:{:?}\n", bit);            
                 if bit == false {
                     // In case of low/false, we take over the next byte
                     rgb5_buffer.push(raw_data[index]);
                     index += 1;
+
+                    // TODO: early break for now
+                    if rgb5_buffer.len() == height as usize * width as usize * 2 {
+                        break 'outer;
+                    }             
                 } else {
                     let byte1 = raw_data[index];
                     index += 1;
@@ -110,23 +115,33 @@ impl GSSprite {
                         index += 1;
                     }
 
-                    for _ in 0..=readcount { // we actually do this readcount+1; No idea why :)
+                    for _ in 0..readcount { // Do we actually have to do this readcount+1;? No idea why :)
                         println!("buffer_len:{:?}; offset:{:?}\n", rgb5_buffer.len(), offset);
+                        let out_index = rgb5_buffer.len().saturating_sub(offset as usize); // TODO: Check which behaviour to take and on what type. u16?
                         match rgb5_buffer
-                            .get(rgb5_buffer.len() - offset as usize)
+                            .get(out_index)
                         {
                             Some(data) => {
                                 let data = data.clone();
                                 rgb5_buffer.push(data);
                             },
-                            _ => (),
-                        }
-                        
+                            _ => rgb5_buffer.push(0x00), // Assume default data of 00 in case it is outside the range
+                        };
+
+                        // TODO: early break for now
+                        if rgb5_buffer.len() == height as usize * width as usize * 2 {
+                            break 'outer;
+                        }                       
                     }
                 }
             }
         }
 
+        // TODO: I make sure to fill it up with shit to get to the correct dimensions
+        while rgb5_buffer.len() < height as usize * width as usize * 2 {
+            rgb5_buffer.push(0x00);
+        } 
+        
         let data: Vec<GSColor> = rgb5_buffer
             .as_slice()
             .chunks_exact(2)
@@ -269,8 +284,11 @@ impl GSRom {
                 raw_sprite_atlas[17],
                 raw_sprite_atlas[16],
             ) as usize;
+            
+            let identifier = format!("{:#010X}", i * 20 + 0x08300000);
 
-            let identifier = format!("{:#010X}", i * 20 + 0x08000000);
+            println!("{}: {}x{} at {:#010X} with {} or {} addrs", identifier, sprite_width, sprite_height, sprites_addr, num_of_dir, _num_of_ani);
+
             let mut sprite_atlas =
                 GSSpriteAtlas::new(identifier, sprite_width, sprite_height, sprite_scale);
 
@@ -285,8 +303,11 @@ impl GSRom {
                     sprite_addr_bytes[0],
                 ) as usize;
 
+                println!("Final addr: {:#010X}", sprite_addr);
+
                 // I do not want to pass a pointer, so I will just pass a slice of maximum length.
                 // For uncompressed images in RGB5, we would have 2 Bytes per pixel
+                // TODO: Does not seem to be enough?
                 let sprite_data = &self.data[Self::convert_addr(sprite_addr)
                     ..Self::convert_addr(
                         sprite_addr + (sprite_width as usize * sprite_height as usize * 2 as usize),
@@ -294,10 +315,10 @@ impl GSRom {
 
                 match compression_format {
                     0x00 => {
-                        info!(
+                        println!(
                             "compression format {} found at {:#010X}!",
                             compression_format,
-                            i * 20 + 0x08000000
+                            i * 20 + 0x08300000
                         );
                         let sprite = GSSprite::decompress0(
                             sprite_width,
@@ -309,10 +330,10 @@ impl GSRom {
                         sprite_atlas.push(sprite);
                     }
                     0x01 => {
-                        info!(
+                        println!(
                             "compression format {} found at {:#010X}!",
                             compression_format,
-                            i * 20 + 0x08000000
+                            i * 20 + 0x08300000
                         );
                         let sprite = GSSprite::decompress1(
                             sprite_width,
