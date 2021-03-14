@@ -73,7 +73,6 @@ pub fn main() -> Result<(), io::Error> {
         }
     };
 
-
     /* LOGGING */
     SimpleLogger::init(verbosity, Config::default()).unwrap();
 

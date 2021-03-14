@@ -1,10 +1,47 @@
-use log::{error, trace};
+use bitvec::prelude::*;
+use log::{error, info, trace, debug};
 use std::{fs, io, path::Path};
 
 #[derive(Clone, Copy)]
 pub enum GSColor {
     Transparent,
     RGB5([u8; 3]),
+}
+
+impl GSColor {
+    pub fn with_rgba_buffer(buffer: &[u8; 4]) -> Self {
+        if buffer[3] == 255 {
+            //any transparency between 0 and 255 is ignored and assumed to be non-transparent
+            GSColor::Transparent
+        } else {
+            GSColor::RGB5([
+                (buffer[0] as u32 * 31 / 255) as u8,
+                (buffer[1] as u32 * 31 / 255) as u8,
+                (buffer[2] as u32 * 31 / 255) as u8,
+            ])
+        }
+    }
+
+    pub fn with_rgb5_buffer(buffer: &[u8]) -> Self {
+        let color: u16 = GSRom::to_short(buffer[1], buffer[0]);
+
+        let r: u8 = (color & 0x1F) as u8;
+        let g: u8 = ((color >> 5) & 0x1F) as u8;
+        let b: u8 = ((color >> 10) & 0x1F) as u8;
+        GSColor::RGB5([r, g, b])
+    }
+
+    pub fn to_rgba_buffer(&self) -> Vec<u8> {
+        match &self {
+            GSColor::RGB5(rgb) => vec![
+                (rgb[0] as u32 * 255 / 31) as u8,
+                (rgb[1] as u32 * 255 / 31) as u8,
+                (rgb[2] as u32 * 255 / 31) as u8,
+                255,
+            ],
+            _ => vec![0, 0, 0, 0],
+        }
+    }
 }
 
 pub struct GSSprite {
@@ -36,6 +73,69 @@ impl GSSprite {
         Self { data }
     }
 
+    pub fn decompress1(width: u8, height: u8, _scale: u16, raw_data: &[u8]) -> Self {
+        let mut rgb5_buffer: Vec<u8> = vec![];
+
+        let mut index: usize = 0;
+        'outer: loop {
+            let instructions = BitSlice::<Lsb0, u8>::from_element(&raw_data[index]);
+            index += 1;
+
+            println!("instructions:{:?}\n", instructions);
+            //iterate through instructions beginning with highest bit
+            for bit in instructions.iter().rev() { //TODO: Not sure if reversing has the intended effect here
+                println!("instruction bit:{:?}\n", bit);            
+                if bit == false {
+                    // In case of low/false, we take over the next byte
+                    rgb5_buffer.push(raw_data[index]);
+                    index += 1;
+                } else {
+                    let byte1 = raw_data[index];
+                    index += 1;
+                    let byte2 = raw_data[index];
+                    index += 1;
+
+                    let mut readcount = (byte1 & 0x0F) as u32; // lower 4 bits of first byte is readcount
+                    let offset = (((byte1 as u16 & 0xF0) << 4) as u16) | (byte2 as u16); // higher 4 bits of first bytes or'd with the second byte results in a 12 bit offset
+
+                    println!("byte1:{:?}; byte2:{:?}; readcount:{:?}; offset:{:?}\n", byte1, byte2, readcount, offset);
+                    // Break out of complete loop, if both is zero
+                    // whatever is in the output buffer at that point is done
+                    if readcount == 0 {
+                        if offset == 0 {
+                            break 'outer;
+                        }
+
+                        readcount = 16 + raw_data[index] as u32;
+                        index += 1;
+                    }
+
+                    for _ in 0..=readcount { // we actually do this readcount+1; No idea why :)
+                        println!("buffer_len:{:?}; offset:{:?}\n", rgb5_buffer.len(), offset);
+                        match rgb5_buffer
+                            .get(rgb5_buffer.len() - offset as usize)
+                        {
+                            Some(data) => {
+                                let data = data.clone();
+                                rgb5_buffer.push(data);
+                            },
+                            _ => (),
+                        }
+                        
+                    }
+                }
+            }
+        }
+
+        let data: Vec<GSColor> = rgb5_buffer
+            .as_slice()
+            .chunks_exact(2)
+            .map(|chunk| GSColor::with_rgb5_buffer(chunk))
+            .collect();
+
+        Self { data }
+    }
+
     pub fn size(&self) -> usize {
         self.data.len()
     }
@@ -43,10 +143,7 @@ impl GSSprite {
     pub fn get_buffer(&self) -> Vec<u8> {
         self.data
             .iter()
-            .map(|pixel| match pixel {
-                GSColor::RGB5(rgb) => vec![rgb[0], rgb[1], rgb[2], 255],
-                _ => vec![0, 0, 0, 0],
-            })
+            .map(|pixel| pixel.to_rgba_buffer())
             .flatten()
             .collect()
     }
@@ -120,16 +217,11 @@ impl GSRom {
     // nest 5 bit = GREEEN
     // next 5 bit = BLUE
     fn init_c0palette(data: &[u8]) -> [GSColor; 0xE0] {
-        let mut palette: [GSColor; 224] = [GSColor::Transparent; 0xE0];
+        let mut palette: [GSColor; 0xE0] = [GSColor::Transparent; 0xE0];
         let start = Self::convert_addr(0x08017B10);
         let end = Self::convert_addr(0x08017CD0);
-        for (i, short) in data[start..end].chunks(2).enumerate().skip(1) {
-            let color: u16 = Self::to_short(short[1], short[0]);
-
-            let r: u8 = ((color & 0x1F) * 255 / 31) as u8;
-            let g: u8 = (((color >> 5) & 0x1F) * 255 / 31) as u8;
-            let b: u8 = (((color >> 10) & 0x1F) * 255 / 31) as u8;
-            palette[i] = GSColor::RGB5([r, g, b]);
+        for (i, short) in data[start..end].chunks_exact(2).enumerate().skip(1) {
+            palette[i] = GSColor::with_rgb5_buffer(short);
         }
 
         palette
@@ -193,13 +285,20 @@ impl GSRom {
                     sprite_addr_bytes[0],
                 ) as usize;
 
+                // I do not want to pass a pointer, so I will just pass a slice of maximum length.
+                // For uncompressed images in RGB5, we would have 2 Bytes per pixel
                 let sprite_data = &self.data[Self::convert_addr(sprite_addr)
                     ..Self::convert_addr(
-                        sprite_addr + (sprite_width as usize * sprite_height as usize),
+                        sprite_addr + (sprite_width as usize * sprite_height as usize * 2 as usize),
                     )];
 
                 match compression_format {
                     0x00 => {
+                        info!(
+                            "compression format {} found at {:#010X}!",
+                            compression_format,
+                            i * 20 + 0x08000000
+                        );
                         let sprite = GSSprite::decompress0(
                             sprite_width,
                             sprite_height,
@@ -209,8 +308,22 @@ impl GSRom {
                         );
                         sprite_atlas.push(sprite);
                     }
+                    0x01 => {
+                        info!(
+                            "compression format {} found at {:#010X}!",
+                            compression_format,
+                            i * 20 + 0x08000000
+                        );
+                        let sprite = GSSprite::decompress1(
+                            sprite_width,
+                            sprite_height,
+                            sprite_scale,
+                            sprite_data,
+                        );
+                        sprite_atlas.push(sprite);
+                    }
                     _ => error!(
-                        "compression format {} found at {:#010X}!",
+                        "unsupported compression format {} found at {:#010X}!",
                         compression_format,
                         i * 20 + 0x08000000
                     ), //TODO: add other decompression formats
@@ -231,7 +344,7 @@ impl GSRom {
         addr - offset
     }
 
-    const fn to_short(high: u8, low: u8) -> u16 {
+    pub const fn to_short(high: u8, low: u8) -> u16 {
         (high as u16) << 8 | low as u16
     }
 

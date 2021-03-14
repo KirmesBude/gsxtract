@@ -6,6 +6,7 @@ edition = "2018"
 
 [dependencies]
 log = "0.4"
+bitvec = "0.21"
 
 [[test]]
 name = "test"
