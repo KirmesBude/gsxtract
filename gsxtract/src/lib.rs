@@ -1,6 +1,7 @@
 use bitvec::prelude::*;
 use log::{error, info, trace, debug};
 use std::{fs, io, path::Path};
+use std::fmt;
 
 #[derive(Clone, Copy)]
 pub enum GSColor {
@@ -214,27 +215,71 @@ impl GSSpriteAtlas {
         &self.sprites
     }
 }
+
+enum GSRomTitle {
+    TheBrokenSeal,
+    TheLostAge,
+}
+
+impl fmt::Display for GSRomTitle {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let name = match self {
+            Self::TheBrokenSeal => "GS1",
+            Self::TheLostAge => "GS2",
+        };
+        write!(f, "{}", name)
+    }
+}
+
 pub struct GSRom {
     data: Vec<u8>,
     c0palette: [GSColor; 0xE0],
+    title: GSRomTitle,
 }
 
 impl GSRom {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, io::Error> {
         trace!("Got ROM");
         let data = fs::read(path)?;
-        let c0palette = GSRom::init_c0palette(&data);
-        Ok(Self { data, c0palette })
+        let title = {
+            let gamecode = String::from_utf8(data[0xAC..0xB0].to_vec()).unwrap(); /* The 4 Bytes at that location are the game code */ // Extrac function for this
+            match gamecode.as_str() {
+                "AGSE" => GSRomTitle::TheBrokenSeal,
+                "AGFE" => GSRomTitle::TheLostAge,
+                _ => panic!(), //TODO: handle gracefully
+            }
+        };
+        let c0palette = GSRom::init_c0palette(&data, &title);
+
+        Ok(Self { data, c0palette, title})
     }
 
-    // It is:  at 08017B10 to 08017CBF, encoded as 15 bit rgb in LE, MSB is ignored
+    fn c0palette_addr(title: &GSRomTitle) -> (usize, usize) {
+        match *title {
+            GSRomTitle::TheBrokenSeal => {
+                let start = 0x0800779C;
+                let end = 0x0800795C;
+
+                (start, end)
+            }
+            GSRomTitle::TheLostAge => {
+                let start = 0x08017B10;
+                let end = 0x08017CD0;
+
+                (start, end)
+            }
+        }
+    }
+
+    // It is: encoded as 15 bit rgb in LE, MSB is ignored
     // loweset 5 bit = RED
     // nest 5 bit = GREEEN
     // next 5 bit = BLUE
-    fn init_c0palette(data: &[u8]) -> [GSColor; 0xE0] {
+    fn init_c0palette(data: &[u8], title: &GSRomTitle) -> [GSColor; 0xE0] {
         let mut palette: [GSColor; 0xE0] = [GSColor::Transparent; 0xE0];
-        let start = Self::convert_addr(0x08017B10);
-        let end = Self::convert_addr(0x08017CD0);
+        let (start, end) = Self::c0palette_addr(&title);
+        let (start, end) = (Self::convert_addr(start), Self::convert_addr(end));
+
         for (i, short) in data[start..end].chunks_exact(2).enumerate().skip(1) {
             palette[i] = GSColor::with_rgb5_buffer(short);
         }
@@ -250,17 +295,37 @@ impl GSRom {
         self.data.get(Self::convert_addr(addr))
     }
 
+    fn sprite_table_addr(title: &GSRomTitle) -> (usize, usize) {
+        match *title {
+            GSRomTitle::TheBrokenSeal => {
+                let start = 0x08185024;
+                let end = 0x08187824;
+
+                (start, end)
+            }
+            GSRomTitle::TheLostAge => {
+                let start = 0x08300000;
+                let end = 0x083037F0;
+
+                (start, end)
+            }
+        }
+    }
+
+    pub fn sprite_table(&self) -> &[u8] {
+        let (start, end) = Self::sprite_table_addr(&self.title);
+        let (start, end) = (Self::convert_addr(start), Self::convert_addr(end));
+
+        &self.data[start..end]
+    }
+
     pub fn decompress_sprites(&self) -> Vec<GSSpriteAtlas> {
         let mut vec = vec![];
-
-        //TODO:
+        
         //Take the master sprite table slice and go over it in 20Byte chunks
-        //at 08300000 to 08680000
-        //Take some sort of mapping file to give the textures an identifier
-        let start = Self::convert_addr(0x08300000);
-        let end = Self::convert_addr(0x08302918);
-
-        for (i, raw_sprite_atlas) in self.data[start..end].chunks(20).enumerate() {
+        //TOOD: Take some sort of mapping file to give the textures an identifier
+        for (i, raw_sprite_atlas) in self.sprite_table().chunks(20).enumerate() {
+            /* Map bytes */
             let sprite_width = raw_sprite_atlas[0];
             let sprite_height = raw_sprite_atlas[1];
             let sprite_scale = Self::to_short(raw_sprite_atlas[3], raw_sprite_atlas[2]);
@@ -285,9 +350,20 @@ impl GSRom {
                 raw_sprite_atlas[16],
             ) as usize;
             
-            let identifier = format!("{:#010X}", i * 20 + 0x08300000);
+            let identifier = format!("{}_{:#010X}", self.title.to_string(), i * 20 + Self::sprite_table_addr(&self.title).0);
 
             println!("{}: {}x{} at {:#010X} with {} or {} addrs", identifier, sprite_width, sprite_height, sprites_addr, num_of_dir, _num_of_ani);
+
+            /* Especially for GS1 there are a lot of dummy/padding entries in the sprite table */
+            /* They are all zero, but for our purpose it is enough to check width and height */
+            if sprite_width == 0 && sprite_height == 0 {
+                continue;
+            }
+
+            /* TODO: when we check animation, we should continue for the anims at least */
+            if sprites_addr == 0x00000000 {
+                continue
+            }
 
             let mut sprite_atlas =
                 GSSpriteAtlas::new(identifier, sprite_width, sprite_height, sprite_scale);
@@ -303,6 +379,10 @@ impl GSRom {
                     sprite_addr_bytes[0],
                 ) as usize;
 
+                /* TODO: why is this necessary for GS1??? */
+                if !self.is_addr_valid(sprite_addr) {
+                    continue
+                }
                 println!("Final addr: {:#010X}", sprite_addr);
 
                 // I do not want to pass a pointer, so I will just pass a slice of maximum length.
@@ -357,6 +437,20 @@ impl GSRom {
         }
 
         vec
+    }
+
+    fn is_addr_valid(&self, addr: usize) -> bool {
+        let min_addr = 0x08000000;
+        let max_addr = match self.title {
+            GSRomTitle::TheBrokenSeal => {
+                0x087FFFFF
+            }
+            GSRomTitle::TheLostAge => {
+                0x08FFFFFF
+            }
+        };
+
+        addr >= min_addr && addr <= max_addr
     }
 
     const fn convert_addr(addr: usize) -> usize {
