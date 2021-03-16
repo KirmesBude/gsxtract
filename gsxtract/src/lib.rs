@@ -1,7 +1,7 @@
 use bitvec::prelude::*;
-use log::{error, info, trace, debug};
-use std::{fs, io, path::Path};
+use log::{debug, error, trace};
 use std::fmt;
+use std::{fs, io, path::Path};
 
 #[derive(Clone, Copy)]
 pub enum GSColor {
@@ -10,7 +10,7 @@ pub enum GSColor {
 }
 
 impl GSColor {
-    pub fn with_rgba_buffer(buffer: &[u8; 4]) -> Self {
+    pub fn from_rgba(buffer: &[u8; 4]) -> Self {
         if buffer[3] == 255 {
             //any transparency between 0 and 255 is ignored and assumed to be non-transparent
             GSColor::Transparent
@@ -23,7 +23,7 @@ impl GSColor {
         }
     }
 
-    pub fn with_rgb5_buffer(buffer: &[u8]) -> Self {
+    pub fn from_rgb5(buffer: &[u8]) -> Self {
         let color: u16 = GSRom::to_short(buffer[1], buffer[0]);
 
         let r: u8 = (color & 0x1F) as u8;
@@ -32,7 +32,7 @@ impl GSColor {
         GSColor::RGB5([r, g, b])
     }
 
-    pub fn to_rgba_buffer(&self) -> Vec<u8> {
+    pub fn to_rgba(&self) -> Vec<u8> {
         match &self {
             GSColor::RGB5(rgb) => vec![
                 (rgb[0] as u32 * 255 / 31) as u8,
@@ -50,7 +50,7 @@ pub struct GSSprite {
 }
 
 impl GSSprite {
-    pub fn decompress0(
+    pub fn from_compression_format0(
         width: u8,
         height: u8,
         _scale: u16,
@@ -74,7 +74,7 @@ impl GSSprite {
         Self { data }
     }
 
-    pub fn decompress1(width: u8, height: u8, _scale: u16, raw_data: &[u8]) -> Self {
+    pub fn from_compression_format1(width: u8, height: u8, _scale: u16, raw_data: &[u8]) -> Self {
         let mut rgb5_buffer: Vec<u8> = vec![]; //vec![0x00; width as usize * height as usize * 2];
 
         let mut index: usize = 0;
@@ -82,10 +82,10 @@ impl GSSprite {
             let instructions = BitSlice::<Msb0, u8>::from_element(&raw_data[index]);
             index += 1;
 
-            println!("instructions:{:?}\n", instructions);
+            debug!("instructions:{:?}\n", instructions);
             //iterate through instructions beginning with highest bit
             for bit in instructions.iter() {
-                println!("instruction bit:{:?}\n", bit);            
+                debug!("instruction bit:{:?}\n", bit);
                 if bit == false {
                     // In case of low/false, we take over the next byte
                     rgb5_buffer.push(raw_data[index]);
@@ -94,7 +94,7 @@ impl GSSprite {
                     // TODO: early break for now
                     if rgb5_buffer.len() == height as usize * width as usize * 2 {
                         break 'outer;
-                    }             
+                    }
                 } else {
                     let byte1 = raw_data[index];
                     index += 1;
@@ -104,7 +104,10 @@ impl GSSprite {
                     let mut readcount = (byte1 & 0x0F) as u32; // lower 4 bits of first byte is readcount
                     let offset = (((byte1 as u16 & 0xF0) << 4) as u16) | (byte2 as u16); // higher 4 bits of first bytes or'd with the second byte results in a 12 bit offset
 
-                    println!("byte1:{:?}; byte2:{:?}; readcount:{:?}; offset:{:?}\n", byte1, byte2, readcount, offset);
+                    debug!(
+                        "byte1:{:?}; byte2:{:?}; readcount:{:?}; offset:{:?}\n",
+                        byte1, byte2, readcount, offset
+                    );
                     // Break out of complete loop, if both is zero
                     // whatever is in the output buffer at that point is done
                     if readcount == 0 {
@@ -116,23 +119,22 @@ impl GSSprite {
                         index += 1;
                     }
 
-                    for _ in 0..readcount { // Do we actually have to do this readcount+1;? No idea why :)
-                        println!("buffer_len:{:?}; offset:{:?}\n", rgb5_buffer.len(), offset);
+                    for _ in 0..readcount {
+                        // Do we actually have to do this readcount+1;? No idea why :)
+                        debug!("buffer_len:{:?}; offset:{:?}\n", rgb5_buffer.len(), offset);
                         let out_index = rgb5_buffer.len().saturating_sub(offset as usize); // TODO: Check which behaviour to take and on what type. u16?
-                        match rgb5_buffer
-                            .get(out_index)
-                        {
+                        match rgb5_buffer.get(out_index) {
                             Some(data) => {
                                 let data = data.clone();
                                 rgb5_buffer.push(data);
-                            },
+                            }
                             _ => rgb5_buffer.push(0x00), // Assume default data of 00 in case it is outside the range
                         };
 
                         // TODO: early break for now
                         if rgb5_buffer.len() == height as usize * width as usize * 2 {
                             break 'outer;
-                        }                       
+                        }
                     }
                 }
             }
@@ -141,25 +143,21 @@ impl GSSprite {
         // TODO: I make sure to fill it up with shit to get to the correct dimensions
         while rgb5_buffer.len() < height as usize * width as usize * 2 {
             rgb5_buffer.push(0x00);
-        } 
-        
+        }
+
         let data: Vec<GSColor> = rgb5_buffer
             .as_slice()
             .chunks_exact(2)
-            .map(|chunk| GSColor::with_rgb5_buffer(chunk))
+            .map(|chunk| GSColor::from_rgb5(chunk))
             .collect();
 
         Self { data }
     }
 
-    pub fn size(&self) -> usize {
-        self.data.len()
-    }
-
-    pub fn get_buffer(&self) -> Vec<u8> {
+    pub fn to_rgba_buffer(&self) -> Vec<u8> {
         self.data
             .iter()
-            .map(|pixel| pixel.to_rgba_buffer())
+            .map(|pixel| pixel.to_rgba())
             .flatten()
             .collect()
     }
@@ -187,7 +185,7 @@ impl GSSpriteAtlas {
     }
 
     pub fn size(&self) -> (u32, u32) {
-        //TODO: create a square texture from the sprites
+        //TODO: create a "squarish" texture from the sprites
         (0, 0)
     }
 
@@ -231,31 +229,9 @@ impl fmt::Display for GSRomTitle {
     }
 }
 
-pub struct GSRom {
-    data: Vec<u8>,
-    c0palette: [GSColor; 0xE0],
-    title: GSRomTitle,
-}
-
-impl GSRom {
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, io::Error> {
-        trace!("Got ROM");
-        let data = fs::read(path)?;
-        let title = {
-            let gamecode = String::from_utf8(data[0xAC..0xB0].to_vec()).unwrap(); /* The 4 Bytes at that location are the game code */ // Extrac function for this
-            match gamecode.as_str() {
-                "AGSE" => GSRomTitle::TheBrokenSeal,
-                "AGFE" => GSRomTitle::TheLostAge,
-                _ => panic!(), //TODO: handle gracefully
-            }
-        };
-        let c0palette = GSRom::init_c0palette(&data, &title);
-
-        Ok(Self { data, c0palette, title})
-    }
-
-    fn c0palette_addr(title: &GSRomTitle) -> (usize, usize) {
-        match *title {
+impl GSRomTitle {
+    pub fn c0palette_addr(&self) -> (usize, usize) {
+        match self {
             GSRomTitle::TheBrokenSeal => {
                 let start = 0x0800779C;
                 let end = 0x0800795C;
@@ -271,32 +247,8 @@ impl GSRom {
         }
     }
 
-    // It is: encoded as 15 bit rgb in LE, MSB is ignored
-    // loweset 5 bit = RED
-    // nest 5 bit = GREEEN
-    // next 5 bit = BLUE
-    fn init_c0palette(data: &[u8], title: &GSRomTitle) -> [GSColor; 0xE0] {
-        let mut palette: [GSColor; 0xE0] = [GSColor::Transparent; 0xE0];
-        let (start, end) = Self::c0palette_addr(&title);
-        let (start, end) = (Self::convert_addr(start), Self::convert_addr(end));
-
-        for (i, short) in data[start..end].chunks_exact(2).enumerate().skip(1) {
-            palette[i] = GSColor::with_rgb5_buffer(short);
-        }
-
-        palette
-    }
-
-    pub fn c0palette(&self) -> &[GSColor; 0xE0] {
-        &self.c0palette
-    }
-
-    pub fn get(&self, addr: usize) -> Option<&u8> {
-        self.data.get(Self::convert_addr(addr))
-    }
-
-    fn sprite_table_addr(title: &GSRomTitle) -> (usize, usize) {
-        match *title {
+    pub fn sprite_table_addr(&self) -> (usize, usize) {
+        match self {
             GSRomTitle::TheBrokenSeal => {
                 let start = 0x08185024;
                 let end = 0x08187824;
@@ -312,8 +264,71 @@ impl GSRom {
         }
     }
 
+    pub fn is_addr_valid(&self, addr: usize) -> bool {
+        let min_addr = 0x08000000;
+        let max_addr = match self {
+            GSRomTitle::TheBrokenSeal => 0x087FFFFF,
+            GSRomTitle::TheLostAge => 0x08FFFFFF,
+        };
+
+        addr >= min_addr && addr <= max_addr
+    }
+}
+
+pub struct GSRom {
+    data: Vec<u8>,
+    c0palette: [GSColor; 0xE0],
+    title: GSRomTitle,
+}
+
+impl GSRom {
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, io::Error> {
+        trace!("Got ROM");
+        let data = fs::read(path)?;
+        let title = {
+            let gamecode = String::from_utf8(data[0xAC..0xB0].to_vec()).unwrap(); /* The 4 Bytes at that location are the game code */
+ // Extrac function for this
+            match gamecode.as_str() {
+                "AGSE" => GSRomTitle::TheBrokenSeal,
+                "AGFE" => GSRomTitle::TheLostAge,
+                _ => panic!(), //TODO: handle gracefully
+            }
+        };
+        let c0palette = GSRom::init_c0palette(&data, &title);
+
+        Ok(Self {
+            data,
+            c0palette,
+            title,
+        })
+    }
+
+    // It is: encoded as 15 bit rgb in LE, MSB is ignored
+    // loweset 5 bit = RED
+    // nest 5 bit = GREEEN
+    // next 5 bit = BLUE
+    fn init_c0palette(data: &[u8], title: &GSRomTitle) -> [GSColor; 0xE0] {
+        let mut palette: [GSColor; 0xE0] = [GSColor::Transparent; 0xE0];
+        let (start, end) = title.c0palette_addr();
+        let (start, end) = (Self::convert_addr(start), Self::convert_addr(end));
+
+        for (i, short) in data[start..end].chunks_exact(2).enumerate().skip(1) {
+            palette[i] = GSColor::from_rgb5(short);
+        }
+
+        palette
+    }
+
+    pub fn c0palette(&self) -> &[GSColor; 0xE0] {
+        &self.c0palette
+    }
+
+    pub fn get(&self, addr: usize) -> Option<&u8> {
+        self.data.get(Self::convert_addr(addr))
+    }
+
     pub fn sprite_table(&self) -> &[u8] {
-        let (start, end) = Self::sprite_table_addr(&self.title);
+        let (start, end) = self.title.sprite_table_addr();
         let (start, end) = (Self::convert_addr(start), Self::convert_addr(end));
 
         &self.data[start..end]
@@ -321,7 +336,7 @@ impl GSRom {
 
     pub fn decompress_sprites(&self) -> Vec<GSSpriteAtlas> {
         let mut vec = vec![];
-        
+
         //Take the master sprite table slice and go over it in 20Byte chunks
         //TOOD: Take some sort of mapping file to give the textures an identifier
         for (i, raw_sprite_atlas) in self.sprite_table().chunks(20).enumerate() {
@@ -330,7 +345,7 @@ impl GSRom {
             let sprite_height = raw_sprite_atlas[1];
             let sprite_scale = Self::to_short(raw_sprite_atlas[3], raw_sprite_atlas[2]);
             let num_of_dir = raw_sprite_atlas[4];
-            let _num_of_ani = raw_sprite_atlas[5];
+            let num_of_ani = raw_sprite_atlas[5];
             let _x_offset = raw_sprite_atlas[6];
             let _y_offset = raw_sprite_atlas[7];
             let _unknown = raw_sprite_atlas[8];
@@ -343,16 +358,23 @@ impl GSRom {
                 raw_sprite_atlas[13],
                 raw_sprite_atlas[12],
             ) as usize;
-            let _anis_addr: usize = Self::to_word(
+            let anis_addr: usize = Self::to_word(
                 raw_sprite_atlas[19],
                 raw_sprite_atlas[18],
                 raw_sprite_atlas[17],
                 raw_sprite_atlas[16],
             ) as usize;
-            
-            let identifier = format!("{}_{:#010X}", self.title.to_string(), i * 20 + Self::sprite_table_addr(&self.title).0);
 
-            println!("{}: {}x{} at {:#010X} with {} or {} addrs", identifier, sprite_width, sprite_height, sprites_addr, num_of_dir, _num_of_ani);
+            let identifier = format!(
+                "{}_{:#010X}",
+                self.title.to_string(),
+                i * 20 + self.title.sprite_table_addr().0
+            );
+
+            debug!(
+                "{}: {}x{} at {:#010X} with {} or {} addrs",
+                identifier, sprite_width, sprite_height, sprites_addr, num_of_dir, num_of_ani
+            );
 
             /* Especially for GS1 there are a lot of dummy/padding entries in the sprite table */
             /* They are all zero, but for our purpose it is enough to check width and height */
@@ -360,99 +382,162 @@ impl GSRom {
                 continue;
             }
 
-            /* TODO: when we check animation, we should continue for the anims at least */
-            if sprites_addr == 0x00000000 {
-                continue
+            // TODO: duplicated code
+            if self.title.is_addr_valid(sprites_addr) {
+                let dir_identifier = format!("{}_dir", identifier);
+                let mut sprite_atlas =
+                    GSSpriteAtlas::new(dir_identifier, sprite_width, sprite_height, sprite_scale);
+
+                for sprite_addr_bytes in self.data[Self::convert_addr(sprites_addr)
+                    ..Self::convert_addr(sprites_addr + 4 * (num_of_dir as usize))]
+                    .chunks(4)
+                {
+                    let sprite_addr = Self::to_word(
+                        sprite_addr_bytes[3],
+                        sprite_addr_bytes[2],
+                        sprite_addr_bytes[1],
+                        sprite_addr_bytes[0],
+                    ) as usize;
+
+                    /* TODO: why is this necessary for GS1??? */
+                    if !self.title.is_addr_valid(sprite_addr) {
+                        continue;
+                    }
+                    debug!("Final addr: {:#010X}", sprite_addr);
+
+                    // I do not want to pass a pointer, so I will just pass a slice of maximum length.
+                    // For uncompressed images in RGB5, we would have 2 Bytes per pixel
+                    // TODO: Does not seem to be enough?
+                    let sprite_data = &self.data[Self::convert_addr(sprite_addr)
+                        ..Self::convert_addr(
+                            sprite_addr
+                                + (sprite_width as usize * sprite_height as usize * 2 as usize),
+                        )];
+
+                    match compression_format {
+                        0x00 => {
+                            debug!(
+                                "compression format {} found at {:#010X}!",
+                                compression_format,
+                                i * 20 + 0x08300000
+                            );
+                            let sprite = GSSprite::from_compression_format0(
+                                sprite_width,
+                                sprite_height,
+                                sprite_scale,
+                                sprite_data,
+                                &self.c0palette,
+                            );
+                            sprite_atlas.push(sprite);
+                        }
+                        0x01 => {
+                            debug!(
+                                "compression format {} found at {:#010X}!",
+                                compression_format,
+                                i * 20 + 0x08300000
+                            );
+                            let sprite = GSSprite::from_compression_format1(
+                                sprite_width,
+                                sprite_height,
+                                sprite_scale,
+                                sprite_data,
+                            );
+                            sprite_atlas.push(sprite);
+                        }
+                        _ => error!(
+                            "unsupported compression format {} found at {:#010X}!",
+                            compression_format,
+                            i * 20 + 0x08000000
+                        ), //TODO: add other decompression formats
+                    }
+
+                    //sprite_atlas.push(sprite);
+                }
+
+                vec.push(sprite_atlas);
             }
 
-            let mut sprite_atlas =
-                GSSpriteAtlas::new(identifier, sprite_width, sprite_height, sprite_scale);
+            /* TODO: anims are not what I think they are */
+            /*
+            if self.is_addr_valid(anis_addr) {
+                let anim_identifier = format!("{}_anim", identifier);
+                let mut sprite_atlas =
+                GSSpriteAtlas::new(anim_identifier, sprite_width, sprite_height, sprite_scale);
 
-            for sprite_addr_bytes in self.data[Self::convert_addr(sprites_addr)
-                ..Self::convert_addr(sprites_addr + 4 * (num_of_dir as usize))]
-                .chunks(4)
-            {
-                let sprite_addr = Self::to_word(
-                    sprite_addr_bytes[3],
-                    sprite_addr_bytes[2],
-                    sprite_addr_bytes[1],
-                    sprite_addr_bytes[0],
-                ) as usize;
+                for sprite_addr_bytes in self.data[Self::convert_addr(anis_addr)
+                    ..Self::convert_addr(anis_addr + 4 * (num_of_ani as usize))]
+                    .chunks(4)
+                {
+                    let sprite_addr = Self::to_word(
+                        sprite_addr_bytes[3],
+                        sprite_addr_bytes[2],
+                        sprite_addr_bytes[1],
+                        sprite_addr_bytes[0],
+                    ) as usize;
 
-                /* TODO: why is this necessary for GS1??? */
-                if !self.is_addr_valid(sprite_addr) {
-                    continue
-                }
-                println!("Final addr: {:#010X}", sprite_addr);
-
-                // I do not want to pass a pointer, so I will just pass a slice of maximum length.
-                // For uncompressed images in RGB5, we would have 2 Bytes per pixel
-                // TODO: Does not seem to be enough?
-                let sprite_data = &self.data[Self::convert_addr(sprite_addr)
-                    ..Self::convert_addr(
-                        sprite_addr + (sprite_width as usize * sprite_height as usize * 2 as usize),
-                    )];
-
-                match compression_format {
-                    0x00 => {
-                        println!(
-                            "compression format {} found at {:#010X}!",
-                            compression_format,
-                            i * 20 + 0x08300000
-                        );
-                        let sprite = GSSprite::decompress0(
-                            sprite_width,
-                            sprite_height,
-                            sprite_scale,
-                            sprite_data,
-                            &self.c0palette,
-                        );
-                        sprite_atlas.push(sprite);
+                    /* TODO: why is this necessary for GS1??? */
+                    if !self.is_addr_valid(sprite_addr) {
+                        continue
                     }
-                    0x01 => {
-                        println!(
-                            "compression format {} found at {:#010X}!",
+                    println!("Final addr: {:#010X}", sprite_addr);
+
+                    // I do not want to pass a pointer, so I will just pass a slice of maximum length.
+                    // For uncompressed images in RGB5, we would have 2 Bytes per pixel
+                    // TODO: Does not seem to be enough?
+                    let sprite_data = &self.data[Self::convert_addr(sprite_addr)
+                        ..Self::convert_addr(
+                            sprite_addr + (sprite_width as usize * sprite_height as usize * 2 as usize),
+                        )];
+
+                    match compression_format {
+                        0x00 => {
+                            println!(
+                                "compression format {} found at {:#010X}!",
+                                compression_format,
+                                i * 20 + 0x08300000
+                            );
+                            let sprite = GSSprite::decompress0(
+                                sprite_width,
+                                sprite_height,
+                                sprite_scale,
+                                sprite_data,
+                                &self.c0palette,
+                            );
+                            sprite_atlas.push(sprite);
+                        }
+                        0x01 => {
+                            println!(
+                                "compression format {} found at {:#010X}!",
+                                compression_format,
+                                i * 20 + 0x08300000
+                            );
+                            let sprite = GSSprite::decompress1(
+                                sprite_width,
+                                sprite_height,
+                                sprite_scale,
+                                sprite_data,
+                            );
+                            sprite_atlas.push(sprite);
+                        }
+                        _ => error!(
+                            "unsupported compression format {} found at {:#010X}!",
                             compression_format,
-                            i * 20 + 0x08300000
-                        );
-                        let sprite = GSSprite::decompress1(
-                            sprite_width,
-                            sprite_height,
-                            sprite_scale,
-                            sprite_data,
-                        );
-                        sprite_atlas.push(sprite);
+                            i * 20 + 0x08000000
+                        ), //TODO: add other decompression formats
                     }
-                    _ => error!(
-                        "unsupported compression format {} found at {:#010X}!",
-                        compression_format,
-                        i * 20 + 0x08000000
-                    ), //TODO: add other decompression formats
+
+                    //sprite_atlas.push(sprite);
                 }
 
-                //sprite_atlas.push(sprite);
+                vec.push(sprite_atlas);
             }
-
-            vec.push(sprite_atlas);
+            */
         }
 
         vec
     }
 
-    fn is_addr_valid(&self, addr: usize) -> bool {
-        let min_addr = 0x08000000;
-        let max_addr = match self.title {
-            GSRomTitle::TheBrokenSeal => {
-                0x087FFFFF
-            }
-            GSRomTitle::TheLostAge => {
-                0x08FFFFFF
-            }
-        };
-
-        addr >= min_addr && addr <= max_addr
-    }
-
+    /* TODO: Extract to some util module */
     const fn convert_addr(addr: usize) -> usize {
         let offset = 0x08000000;
 

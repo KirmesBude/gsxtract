@@ -102,7 +102,7 @@ fn extract_sprites(rom: &GSRom, output: &str) {
         let path = format!("{}/{}", output, name);
 
         for (i, sprite) in atlas.get_sprites().iter().enumerate() {
-            let buffer = sprite.get_buffer();
+            let buffer = sprite.to_rgba_buffer();
             let image_buffer =
                 image::ImageBuffer::from_raw(atlas.sprite_width(), atlas.sprite_height(), buffer)
                     .unwrap();
