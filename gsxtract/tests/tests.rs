@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use gsxtract::*;
+    use gsxtract::color::GSColor;
+    use gsxtract::sprite::GSSprite;
 
     const PALETTE: [GSColor; 0xE0] = [
         GSColor::Transparent,
@@ -266,7 +267,7 @@ mod tests {
             0xFD, 0xDA, 0xE9, 0x00,
         ];
 
-        let sprite = GSSprite::from_compression_format0(width, height, scale, &raw_data, &PALETTE);
+        let sprite = GSSprite::from_compression_format0(width, height, scale, &raw_data, &PALETTE); //TODO: fix test case
 
         let expected_size = width as usize * height as usize;
         /*let actual_size = sprite.size();

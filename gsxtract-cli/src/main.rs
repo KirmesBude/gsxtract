@@ -1,5 +1,5 @@
 use clap::{crate_authors, crate_description, crate_name, crate_version, App, Arg};
-use gsxtract::*;
+use gsxtract::rom::GSRom;
 use simplelog::{Config, LevelFilter, SimpleLogger};
 use std::{fs::File, io};
 use texture_packer::{exporter::ImageExporter, texture::Texture};
