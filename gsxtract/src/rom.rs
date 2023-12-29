@@ -147,11 +147,11 @@ impl GSRom {
             let compression_format = raw_sprite_atlas[10];
             let _unused = raw_sprite_atlas[11];
             let sprites_addr: usize = util::as_u32(&raw_sprite_atlas[12..=15]) as usize;
-            let anis_addr: usize = util::as_u32(&raw_sprite_atlas[16..=19]) as usize;
+            let _anis_addr: usize = util::as_u32(&raw_sprite_atlas[16..=19]) as usize;
 
             let identifier = format!(
                 "{}_{:#010X}",
-                self.title.to_string(),
+                self.title,
                 i * 20 + self.title.sprite_table_addr().0
             );
 

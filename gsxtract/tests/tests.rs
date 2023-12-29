@@ -267,15 +267,15 @@ mod tests {
             0xFD, 0xDA, 0xE9, 0x00,
         ];
 
-        let sprite = GSSprite::from_compression_format0(width, height, scale, &raw_data, &PALETTE); //TODO: fix test case
+        let sprite = GSSprite::from_compression_format0(width, height, scale, &raw_data, &PALETTE);
 
         let expected_size = width as usize * height as usize;
-        /*let actual_size = sprite.size();
+        let actual_size = sprite.size();
         assert!(
             actual_size == expected_size,
             "Expected {}, but was {}!",
             expected_size,
             actual_size
-        );*/
+        );
     }
 }

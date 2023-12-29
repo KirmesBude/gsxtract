@@ -1,70 +1,30 @@
-use clap::{crate_authors, crate_description, crate_name, crate_version, App, Arg};
+use clap::Parser;
 use gsxtract::rom::GSRom;
 use simplelog::{Config, LevelFilter, SimpleLogger};
 use std::{fs::File, io};
 use texture_packer::{exporter::ImageExporter, texture::Texture};
 
+#[derive(Debug, Parser)]
+#[command(author, version, about, long_about = None)] // Read from `Cargo.toml`
+pub struct Cli {
+    #[arg(short, long)]
+    path: String,
+    #[arg(short, long)]
+    output: String,
+    #[arg(short, long, action = clap::ArgAction::Count)]
+    verbose: u8,
+    #[arg(short, long)]
+    quiet: bool,
+}
+
 pub fn main() -> Result<(), io::Error> {
-    /* COMMAND ARGUMENTS */
-    /* basic app information */
-    let app = App::new(crate_name!())
-        .version(crate_version!())
-        .about(crate_description!())
-        .author(crate_authors!());
-
-    /* define the path command line option */
-    let path_option = Arg::with_name("path")
-        .last(true)
-        .takes_value(true)
-        .help("Path to a Golden Sun ROM")
-        .required(true);
-    let app = app.arg(path_option);
-
-    /* define the output command line option */
-    let output_option = Arg::with_name("output")
-        .long("output")
-        .short("o")
-        .takes_value(true)
-        .help("Output path")
-        .required(true);
-    let app = app.arg(output_option);
-
-    /* define the verbosity command line option */
-    let verbosity_option = Arg::with_name("verbosity")
-        .short("v")
-        .multiple(true)
-        .help("Sets the level of verbosity")
-        .required(false);
-    let app = app.arg(verbosity_option);
-
-    /* define the quiet command line option */
-    let quiet_option = Arg::with_name("quiet")
-        .short("q")
-        .help("Silence all output")
-        .required(false);
-    let app = app.arg(quiet_option);
-
-    /* extract matches */
-    let matches = app.get_matches();
-
-    /* extract the actual output */
-    let output = matches
-        .value_of("output")
-        .expect("This can't be None, we said it was required");
-
-    /* extract the actual path */
-    let path = matches
-        .value_of("path")
-        .expect("This can't be None, we said it was required");
-
-    /* extract the actual quiet */
-    let quiet = matches.is_present("quiet");
+    let cli = Cli::parse();
 
     /* extract the actual verbosity */
-    let verbosity = if quiet {
+    let verbosity = if cli.quiet {
         LevelFilter::Off
     } else {
-        match matches.occurrences_of("v") {
+        match cli.verbose {
             0 => LevelFilter::Error,
             1 => LevelFilter::Warn,
             2 => LevelFilter::Info,
@@ -76,9 +36,9 @@ pub fn main() -> Result<(), io::Error> {
     /* LOGGING */
     SimpleLogger::init(verbosity, Config::default()).unwrap();
 
-    let rom = GSRom::new(path)?;
+    let rom = GSRom::new(&cli.path)?;
 
-    extract_sprites(&rom, output);
+    extract_sprites(&rom, &cli.output);
 
     Ok(())
 }
@@ -94,6 +54,7 @@ fn extract_sprites(rom: &GSRom, output: &str) {
         texture_padding: 2,
         trim: false,
         texture_outlines: true,
+        ..Default::default()
     };
 
     for atlas in sprite_atlases {

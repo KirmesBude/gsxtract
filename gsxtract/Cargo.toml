@@ -2,11 +2,11 @@
 name = "gsxtract"
 version = "0.1.0"
 authors = ["KirmesBude <kirmesbude@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 log = "0.4"
-bitvec = "0.21"
+bitvec = "1.0"
 thiserror = "1.0"
 
 [[test]]

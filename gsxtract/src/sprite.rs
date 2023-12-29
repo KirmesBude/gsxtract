@@ -9,7 +9,7 @@ pub struct GSSprite {
 }
 
 impl GSSprite {
-    pub(crate) fn from_compression_format0(
+    pub fn from_compression_format0(
         width: u8,
         height: u8,
         _scale: u16,
@@ -33,17 +33,12 @@ impl GSSprite {
         Self { data }
     }
 
-    pub(crate) fn from_compression_format1(
-        width: u8,
-        height: u8,
-        _scale: u16,
-        raw_data: &[u8],
-    ) -> Self {
+    pub fn from_compression_format1(width: u8, height: u8, _scale: u16, raw_data: &[u8]) -> Self {
         let mut rgb5_buffer: Vec<u8> = vec![]; //vec![0x00; width as usize * height as usize * 2];
 
         let mut index: usize = 0;
         'outer: loop {
-            let instructions = BitSlice::<Msb0, u8>::from_element(&raw_data[index]);
+            let instructions = BitSlice::<u8, Msb0>::from_element(&raw_data[index]);
             index += 1;
 
             debug!("instructions:{:?}\n", instructions);
@@ -66,7 +61,7 @@ impl GSSprite {
                     index += 1;
 
                     let mut readcount = (byte1 & 0x0F) as u32; // lower 4 bits of first byte is readcount
-                    let offset = (((byte1 as u16 & 0xF0) << 4) as u16) | (byte2 as u16); // higher 4 bits of first bytes or'd with the second byte results in a 12 bit offset
+                    let offset = ((byte1 as u16 & 0xF0) << 4) | (byte2 as u16); // higher 4 bits of first bytes or'd with the second byte results in a 12 bit offset
 
                     debug!(
                         "byte1:{:?}; byte2:{:?}; readcount:{:?}; offset:{:?}\n",
@@ -111,7 +106,7 @@ impl GSSprite {
         let data: Vec<GSColor> = rgb5_buffer
             .as_slice()
             .chunks_exact(2)
-            .map(|chunk| GSColor::from_rgb5(chunk))
+            .map(GSColor::from_rgb5)
             .collect();
 
         Self { data }
@@ -120,9 +115,12 @@ impl GSSprite {
     pub fn to_rgba_buffer(&self) -> Vec<u8> {
         self.data
             .iter()
-            .map(|pixel| pixel.to_rgba().to_vec())
-            .flatten()
+            .flat_map(|pixel| pixel.to_rgba().to_vec())
             .collect()
+    }
+
+    pub fn size(&self) -> usize {
+        self.data.len()
     }
 }
 
