@@ -4,5 +4,6 @@ pub mod color;
 pub mod error;
 pub mod rom;
 pub mod sprite;
+pub mod comp;
 
 mod util;

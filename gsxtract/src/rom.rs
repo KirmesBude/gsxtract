@@ -99,7 +99,7 @@ impl GSRom {
 
     // It is: encoded as 15 bit rgb in LE, MSB is ignored
     // loweset 5 bit = RED
-    // nest 5 bit = GREEEN
+    // next 5 bit = GREEN
     // next 5 bit = BLUE
     fn init_c0palette(data: &[u8], title: &GSRomTitle) -> [GSColor; 0xE0] {
         let mut palette: [GSColor; 0xE0] = [GSColor::Transparent; 0xE0];
@@ -150,9 +150,10 @@ impl GSRom {
             let _anis_addr: usize = util::as_u32(&raw_sprite_atlas[16..=19]) as usize;
 
             let identifier = format!(
-                "{}_{:#010X}",
+                "{}_{:#010X}_{}",
                 self.title,
-                i * 20 + self.title.sprite_table_addr().0
+                i * 20 + self.title.sprite_table_addr().0,
+                compression_format,
             );
 
             debug!(
@@ -208,8 +209,7 @@ impl GSRom {
                                 &self.c0palette,
                             );
                             sprite_atlas.push(sprite);
-                        }
-                        /*
+                        },
                         0x01 => {
                             debug!(
                                 "compression format {} found at {:#010X}!",
@@ -221,14 +221,14 @@ impl GSRom {
                                 sprite_height,
                                 sprite_scale,
                                 sprite_data,
+                                &self.c0palette,
                             );
                             sprite_atlas.push(sprite);
-                        }
-                        */
+                        },
                         _ => error!(
                             "unsupported compression format {} found at {:#010X}!",
                             compression_format,
-                            i * 20 + 0x08000000
+                            i * 20 + 0x08300000
                         ), //TODO: add other decompression formats
                     }
 
