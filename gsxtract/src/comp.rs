@@ -9,12 +9,119 @@ pub fn from_standard_lz(raw_data: &[u8]) -> Vec<u8> {
         0x00 => from_standard_lz_0(iter),
         0x01 => from_standard_lz_1(iter),
         0x02 => from_standard_lz_2(iter),
-        _ => vec![], /* TODO: Handle better */
+        _ => !unreachable!(), /* TODO: Better? */
     }
 }
 
-fn from_standard_lz_0<'a>(_iter: impl IntoIterator<Item = &'a u8>) -> Vec<u8> {
-    vec![]
+fn from_standard_lz_0<'a>(iter: impl IntoIterator<Item = &'a u8>) -> Vec<u8> {
+    let mut iter = iter.into_iter();
+    let mut decoded = vec![];
+
+    let mut bits = iter.next_u16() as u32;
+    let mut nbits = 16;
+
+    let mut shift;
+    let mut ncopy;
+
+    loop {
+        if (bits & 0x01) != 0 {
+            decoded.push(((bits >> 1) & 0xFF) as u8);
+            shift = 9;
+            ncopy = 0;
+        } else if (bits & 0x02) == 0 {
+            shift = 2;
+            ncopy = 2;
+        } else if (bits & 0x04) == 0 {
+            shift = 3;
+            ncopy = 3;
+        } else if (bits & 0x08) == 0 {
+            shift = 4;
+            ncopy = 4;
+        } else if (bits & 0x10) == 0 {
+            shift = 5;
+            ncopy = 5;
+        } else if (bits & 0x20) == 0 {
+            if (bits & 0x40) == 0 {
+                shift = 7;
+                ncopy = 6;
+            } else {
+                shift = 7;
+                ncopy = 7;
+            }
+        } else {
+            shift = 8;
+            ncopy = (bits >> 6) & 3;
+
+            if ncopy == 0 {
+                shift = 15;
+                ncopy = (bits >> 8) & 0x7F;
+
+                if ncopy == 0 {
+                    break;
+                } else {
+                    ncopy += 10;
+                }
+            } else {
+                ncopy += 7;
+            }
+        }
+
+        bits >>= shift;
+        nbits -= shift;
+
+        if nbits < 15 {
+            let new = iter.next_u16() as u32;
+            bits |= new << nbits;
+            nbits += 16;
+        }
+
+        if ncopy > 0 {
+            let mut offset;
+            if (bits & 1) != 0 {
+                offset = ((bits >> 1) & 0x1F) as usize;
+                shift = 6;
+            } else {
+                let buflen = decoded.len() as isize - 33;
+
+                if buflen >= 0x800 {
+                    shift = 13;
+                    offset = ((bits >> 1) & 0xFFF) as usize;
+                } else {
+                    shift = 12;
+                    let mut bit = 1 << 11;
+
+                    while (buflen & bit) == 0 && shift > 0 {
+                        shift -= 1;
+                        bit >>= 1;
+                    }
+
+                    offset = (bits >> 1) as usize & ((1 << shift) - 1);
+                    shift += 1;
+                }
+
+                offset += 32;
+            }
+
+            bits >>= shift;
+            nbits -= shift;
+            if nbits < 15 {
+                let new = iter.next_u16() as u32;
+                bits |= new << nbits;
+                nbits += 16;
+            }
+
+            offset += 1;
+            while ncopy > 0 {
+                if decoded.len() < offset {
+                    return vec![];
+                }
+                decoded.push(decoded[decoded.len() - offset]);
+                ncopy -= 1;
+            }
+        }
+    }
+
+    decoded
 }
 
 fn from_standard_lz_1<'a>(iter: impl IntoIterator<Item = &'a u8>) -> Vec<u8> {
@@ -56,7 +163,7 @@ fn from_standard_lz_2<'a>(_iter: impl IntoIterator<Item = &'a u8>) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::from_standard_lz_0;
+    use crate::comp::from_standard_lz;
 
     #[test]
     fn test_lz_0() {
@@ -287,7 +394,7 @@ mod tests {
             0x00, 0x00,
         ];
 
-        let output = from_standard_lz_0(&input);
+        let output = from_standard_lz(&input);
 
         assert_eq!(assert_output.to_vec(), output);
     }

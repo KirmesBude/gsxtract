@@ -138,7 +138,21 @@ impl GSRom {
             let sprite_width = raw_sprite_atlas[0];
             let sprite_height = raw_sprite_atlas[1];
             let sprite_scale = util::as_u16(&raw_sprite_atlas[2..=3].try_into().unwrap());
+            /* This is not actually num_of_dir */
             let num_of_dir = raw_sprite_atlas[4];
+            let num_of_dir = if num_of_dir > 8 {
+                if [0x14, 0x15, 0xFF].contains(&num_of_dir) {
+                    2
+                } else if num_of_dir == 0x22 {
+                    5
+                } else if num_of_dir == 0x28 {
+                    4
+                } else {
+                    1
+                }
+            } else {
+                num_of_dir
+            };
             let _num_of_ani = raw_sprite_atlas[5];
             let _x_offset = raw_sprite_atlas[6];
             let _y_offset = raw_sprite_atlas[7];
