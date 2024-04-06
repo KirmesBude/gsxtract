@@ -22,7 +22,7 @@ impl GSSprite {
                 break;
             }
             match byte {
-                0x00 => continue,                                             //end
+                0x00 => continue,                                          //end
                 0x01..=0xDF => data[i + offset] = palette[*byte as usize], //decompress from palette
                 0xE0..=0xFF => offset += (*byte - 0xE0) as usize, //increase offset to compensate
             }
@@ -31,7 +31,13 @@ impl GSSprite {
         Self { data }
     }
 
-    pub fn from_compression_format1(width: u8, height: u8, _scale: u16, raw_data: &[u8], palette: &[GSColor; 0xE0]) -> Self {
+    pub fn from_compression_format1(
+        width: u8,
+        height: u8,
+        _scale: u16,
+        raw_data: &[u8],
+        palette: &[GSColor; 0xE0],
+    ) -> Self {
         let decoded = from_standard_lz(raw_data);
 
         Self::from_compression_format0(width, height, _scale, &decoded, palette)

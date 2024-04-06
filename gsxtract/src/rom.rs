@@ -107,7 +107,7 @@ impl GSRom {
         let (start, end) = (Self::convert_addr(start), Self::convert_addr(end));
 
         for (i, short) in data[start..end].chunks_exact(2).enumerate().skip(1) {
-            palette[i] = GSColor::from_rgb5(short);
+            palette[i] = GSColor::from_rgb5(short.try_into().unwrap());
         }
 
         palette
@@ -137,17 +137,19 @@ impl GSRom {
             /* Map bytes */
             let sprite_width = raw_sprite_atlas[0];
             let sprite_height = raw_sprite_atlas[1];
-            let sprite_scale = util::as_u16(&raw_sprite_atlas[2..=3]);
+            let sprite_scale = util::as_u16(&raw_sprite_atlas[2..=3].try_into().unwrap());
             let num_of_dir = raw_sprite_atlas[4];
-            let num_of_ani = raw_sprite_atlas[5];
+            let _num_of_ani = raw_sprite_atlas[5];
             let _x_offset = raw_sprite_atlas[6];
             let _y_offset = raw_sprite_atlas[7];
             let _unknown = raw_sprite_atlas[8];
             let _collsion_radius = raw_sprite_atlas[9];
             let compression_format = raw_sprite_atlas[10];
             let _unused = raw_sprite_atlas[11];
-            let sprites_addr: usize = util::as_u32(&raw_sprite_atlas[12..=15]) as usize;
-            let _anis_addr: usize = util::as_u32(&raw_sprite_atlas[16..=19]) as usize;
+            let sprites_addr: usize =
+                util::as_u32(&raw_sprite_atlas[12..=15].try_into().unwrap()) as usize;
+            let _anis_addr: usize =
+                util::as_u32(&raw_sprite_atlas[16..=19].try_into().unwrap()) as usize;
 
             let identifier = format!(
                 "{}_{:#010X}_{}",
@@ -157,8 +159,8 @@ impl GSRom {
             );
 
             debug!(
-                "{}: {}x{} at {:#010X} with {} or {} addrs",
-                identifier, sprite_width, sprite_height, sprites_addr, num_of_dir, num_of_ani
+                "{}: {}x{} at {:#010X} with {} addrs",
+                identifier, sprite_width, sprite_height, sprites_addr, num_of_dir
             );
 
             /* Especially for GS1 there are a lot of dummy/padding entries in the sprite table */
@@ -177,7 +179,8 @@ impl GSRom {
                     ..Self::convert_addr(sprites_addr + 4 * (num_of_dir as usize))]
                     .chunks(4)
                 {
-                    let sprite_addr = util::as_u32(&sprite_addr_bytes[0..=3]) as usize;
+                    let sprite_addr =
+                        util::as_u32(&sprite_addr_bytes[0..=3].try_into().unwrap()) as usize;
 
                     /* TODO: why is this necessary for GS1??? */
                     if !self.title.is_addr_valid(sprite_addr) {
@@ -209,7 +212,7 @@ impl GSRom {
                                 &self.c0palette,
                             );
                             sprite_atlas.push(sprite);
-                        },
+                        }
                         0x01 => {
                             debug!(
                                 "compression format {} found at {:#010X}!",
@@ -224,7 +227,7 @@ impl GSRom {
                                 &self.c0palette,
                             );
                             sprite_atlas.push(sprite);
-                        },
+                        }
                         _ => error!(
                             "unsupported compression format {} found at {:#010X}!",
                             compression_format,

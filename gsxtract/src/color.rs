@@ -16,7 +16,7 @@ pub enum GSColor {
 
 impl GSColor {
     /// Constructs GSColor from a rgba byte stream
-    pub fn from_rgba(buffer: &[u8]) -> Self {
+    pub fn from_rgba(buffer: &[u8; 3]) -> Self {
         if buffer[3] == 255 {
             //any transparency between 0 and 255 is ignored and assumed to be non-transparent
             GSColor::Transparent
@@ -30,7 +30,7 @@ impl GSColor {
     }
 
     /// Constructs GSColor from a rgb555 byte stream
-    pub fn from_rgb5(buffer: &[u8]) -> Self {
+    pub fn from_rgb5(buffer: &[u8; 2]) -> Self {
         let color: u16 = util::as_u16(buffer);
 
         let r: u8 = (color & 0x1F) as u8;
