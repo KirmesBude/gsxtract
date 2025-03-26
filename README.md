@@ -1,3 +1,4 @@
+# WIP - Pet project - extracts only a few sprites at the moment (incorrectly) #
 This should serve as a library and a command line tool.
 
 # Goals
